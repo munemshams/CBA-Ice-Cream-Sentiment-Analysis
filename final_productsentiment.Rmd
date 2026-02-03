@@ -1,0 +1,701 @@
+---
+title: "R Notebook"
+output:
+  word_document: default
+  html_notebook: default
+---
+BIS 581 - Product Sentiment Analysis
+
+
+# load libraries that you feel you need and explain why
+```{r codechunk-libraryload, echo=FALSE, message=FALSE, warning=FALSE}
+if (!("knitr" %in% installed.packages())) install.packages("knitr")
+library(knitr)
+library(tidyverse)
+library(tidytext)
+library(wordcloud)
+library(textdata)
+library(igraph)
+library(ggraph)
+```
+
+#Explanation:
+
+If libraries are not installed then we use the install.packages function to install them. I did not keep those codes in the chunk but I am writing it down here for clarity.
+
+The tidyverse package is my primary data handling and visualization toolkit. I need it for data cleaning, transformation, and creating ggplot2 visualizations. We know it is a collection of multiple packages such as dplyr or ggplot2.
+
+The tidytext package is essential for removing stop words, and working with sentiment lexicons in a tidy data framework.
+
+I need the wordcloud package for creating word clouds for my analysis.
+
+The textdata package provides access to various sentiment lexicons such as nrc or AFINN.
+
+The igraph and ggraph packages are needed for creating network diagrams and visualizations.
+
+
+# Load the data from a file
+```{r code1, echo=FALSE, message=FALSE, warning=FALSE}
+options(stringsAsFactors = FALSE)
+
+#place your code file and data file in the same folder OR use this code and adjust it for your environment
+#folderst <- "D://data//myproject//"
+#setwd(folderst)
+
+posts <- readRDS("productsalescomments.rds")
+
+```
+
+# Assess the data
+
+Before beginning analysis, I need to understand the structure and quality of the dataset. This examination helps identify potential issues like missing values, unusual data types, or structural problems that could affect the analysis results.
+
+```{r Code 2}
+# Checking structure to understand variable types and data organization
+str(posts)
+
+# Viewing first few rows to see actual data content
+head(posts)
+
+# Getting summary statistics for numerical variables
+summary(posts)
+
+# Checking for missing values in each column
+colSums(is.na(posts))
+
+# Verifying data types for proper handling
+sapply(posts, class)
+```
+
+
+
+# Is any data prep needed?   If so, adjust data here and comment on why in your submission
+
+Text data almost always requires cleaning and preprocessing. I need to remove duplicates, handle missing comments, tokenize the text into individual words, remove common stop words that don't carry meaningful sentiment, and apply stemming to normalize word variations.
+
+```{r Code 3}
+comment <- colnames(posts)[11]
+
+posts_clean <- posts %>%
+  distinct() %>%
+  filter(!is.na(.[[11]]))
+
+tidy_posts <- posts_clean %>%
+  unnest_tokens(word, !!comment) %>%
+  anti_join(stop_words) %>%
+  filter(!str_detect(word, "^[0-9]"))
+
+```
+
+
+# Decide if you want to filter
+```{r Code 4}
+#if needed, filter the data down to what you feel is relevant
+#In your analysis please comment on what you filtered and why
+
+empty_comments_removed <- posts_clean %>%
+  filter(Comment != "" & !is.na(Comment))
+
+```
+
+## Explanation:
+I did filter the empty comments out from the comments column. There is a question that asks what are the top 10 comments by customers. If I don't filter the empty comment boxes out then the top comment at number one is an empty entry which R includes in the results as an entry. So I had to filter the the empty comments out of the data in order to get the top 10 comments.
+
+# Now answer/create the following:
+
+##Top 15 meaningful words
+
+#Selecting 30 words at first so that I can filter 15 meaningful words from them
+
+I'm generating a table of the 30 most frequent words from the processed comments. This gives us a broader selection to choose from, allowing me to identify which words are truly meaningful in the context of product sentiment analysis rather than just taking the most frequent ones automatically.
+
+```{r Code 5}
+# Creating a table of the top 30 most frequent words
+top_30_words <- tidy_posts %>%
+  count(word, sort = TRUE) %>%
+  head(30)
+
+# Displaying the table
+top_30_words
+```
+
+#Filtering them to 15 most meaningful words
+
+Now I will create a stop list to filter out unnecessary and irrelevant words and filter out 15 meaningful words focusing on terms that provide genuine insights into product features, customer experiences, and sentiment. The selection prioritizes words related to product attributes (flavors, types), customer reactions, and descriptive terms that can inform business decisions.
+
+```{r Code 6}
+# Creating custom stop words
+stopwords <- c("ice", "cream", "cone", "scoop", "i'm", "i’m", "there's", "there’s", "can't", "can’t", "life","life's", "one's", "world", "time", "met", "tall", "eat", "buy", "mac", "it's", "it’s", "that's", "that’s", "don't", "don’t", "just", "get", "like", "one", "really", "much", "will", "now", "good")
+
+# Applying custom stop words and get top 15 meaningful words
+meaningful_words <- tidy_posts %>%
+  filter(!word %in% stopwords) %>%
+  count(word, sort = TRUE) %>%
+  head(15)
+
+# Creating visualization
+meaningful_words_chart <- meaningful_words %>%
+  ggplot(aes(x = reorder(word, n), y = n)) +
+  geom_col(fill = "steelblue", alpha = 0.8) +
+  coord_flip() +
+  labs(title = "Top 15 Meaningful Words in Comments",
+       x = "Word", 
+       y = "Frequency") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14),
+        plot.subtitle = element_text(color = "gray40"))
+
+# Display the results
+print(meaningful_words)
+meaningful_words_chart
+```
+
+#Why these words are meaningful:
+
+Positive Emotions: "love", "wow", "perfect", "delight" - These directly indicate customer satisfaction and emotional connection with products.
+
+Specific Flavors: "cherry", "cookie", "thimbleberry", "mint", "fudge" - These reveal which specific flavors customers are mentioning, helping identify popular options.
+
+Experience Descriptors: "flavor", "dessert", "pie" - These show that customers were specifying their descriptions in the comments.
+
+Intensity Words: "mighty", "crazy", "scream" - These indicate strong reactions, either positive or negative, that warrant further investigation.
+
+#Words I Excluded and Why:
+
+"ice", "cream", "cone" - Obvious words because I'm analyzing data of an ice cream company.
+
+"i'm", "there's", "can't" - Common speech patterns without product insights.
+
+"life", "world", "time", "eat", "buy" - Too generic for meaningful business decisions.
+
+"scoop", "mac", "feature" - Less informative for sentiment analysis.
+
+
+##Word cloud
+
+I'll create the word cloud by using the same custom stop list we used for the word frequency chart.
+
+```{r code 7, echo=FALSE, message=FALSE, warning=FALSE}
+# Using the existing stopwords list from previous analysis
+meaningful_word_freq <- tidy_posts %>%
+  filter(!word %in% stopwords) %>%
+  count(word, sort = TRUE)
+
+# Create word cloud with meaningful words
+wordcloud(words = meaningful_word_freq$word,
+          freq = meaningful_word_freq$n,
+          max.words = 65,
+          random.order = FALSE,
+          colors = brewer.pal(8, "Dark2"),
+          scale = c(3.5, 0.8),
+          rot.per = 0.25)
+```
+
+
+##Who are the top 5 customers by CustomerID who posts the most comments on products?  For each these 5 are these positive or negative customers overall considering a measure using the afinn sentiment measure?
+
+I identified the most active customers by comment count, then calculated their average AFINN sentiment scores. AFINN provides numerical sentiment values (-5 to +5) where negative values indicate negative sentiment and positive values indicate positive sentiment.
+
+
+```{r code 8}
+# Loading the AFINN sentiment lexicon
+afinn <- get_sentiments("afinn")
+
+# First, identifying top 5 customers by comment count from the original data
+comment_count <- posts_clean %>%
+  count(CustomerID, name = "total_comments") %>%
+  arrange(desc(total_comments)) %>%
+  head(7)
+
+# Calculating sentiment for these top customers
+customer_sentiment <- tidy_posts %>%
+  filter(CustomerID %in% comment_count$CustomerID) %>%
+  inner_join(afinn, by = "word") %>%
+  group_by(CustomerID) %>%
+  summarise(
+    total_sentiment_words = n(),  # Number of words with sentiment scores
+    avg_sentiment = mean(value),  # Average AFINN score (-5 to +5)
+    total_sentiment = sum(value),  # Cumulative sentiment score
+    sentiment_category = case_when(
+      avg_sentiment > 0.5 ~ "Strongly Positive",
+      avg_sentiment > 0 ~ "Positive", 
+      avg_sentiment < -0.5 ~ "Strongly Negative",
+      avg_sentiment < 0 ~ "Negative",
+      TRUE ~ "Neutral"
+    )
+  ) %>%
+  left_join(comment_count, by = "CustomerID") %>%
+  select(CustomerID, total_comments, total_sentiment_words, avg_sentiment, total_sentiment, sentiment_category) %>%
+  arrange(desc(total_comments))
+
+# Displaying the results
+customer_sentiment
+
+# Providing Visualization
+customer_sentiment %>%
+  ggplot(aes(x = reorder(as.character(CustomerID), avg_sentiment), y = avg_sentiment, fill = sentiment_category)) +
+  geom_col(alpha = 0.8) +
+  geom_text(aes(label = paste0(round(avg_sentiment, 2), "\n", total_comments, " comments")), 
+            vjust = 0.5, hjust = -0.1, size = 3, lineheight = 0.8) +
+  coord_flip() +
+  scale_fill_manual(values = c("Strongly Positive" = "darkgreen", 
+                              "Positive" = "lightgreen",
+                              "Neutral" = "gray",
+                              "Negative" = "orange",
+                              "Strongly Negative" = "red")) +
+  labs(title = "Top Customers: Sentiment Analysis",
+       subtitle = "With Average sentiment score and Number of comments",
+       x = "Customer ID",
+       y = "Number of Comments",
+       fill = "Sentiment Category") +
+  theme_minimal() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15)))
+
+
+```
+
+Customer Engagement: The total_comments column shows how many comments each customer has posted, indicating their level of engagement with your products.
+
+Sentiment Measurement:
+
+avg_sentiment: Average AFINN score ranging from -5 (very negative) to +5 (very positive)
+
+total_sentiment: Cumulative sentiment across all their comments
+
+sentiment_category: Classification of their overall sentiment
+
+#Results and Analysis:
+Top Performers :
+
+Customer ID #99: Highest average sentiment (1.93) with 52 cumulative points across 38 comments
+
+Customer ID #94: Near-identical high performance (1.90 average) with 38 cumulative points across 37 comments
+
+Strong Contributors:
+
+Customer ID #251: Balanced positive sentiment (1.56 average) with 25 cumulative points
+
+Customer ID #301: Consistent positive engagement (1.60 average) with 24 cumulative points
+
+Moderate but Positive:
+
+Customer ID #180: Lowest of the group but still solidly positive (1.18 average) with 20 cumulative points
+
+Key Business Insights
+1. The narrow range of comment counts (37-38) suggests these customers are equally engaged, while sentiment variations indicate different levels of enthusiasm.
+
+2. Customers #99 and #94 are particularly valuable with sentiment scores approaching 2.0 - consider them for testimonials or referral programs.
+
+3. Consistent Quality Perception: All scores are positive, indicating no major dissatisfaction issues among your most vocal customers.
+
+##What Parlor site has the most comments?  Are these negative or positive?
+
+Across the 8 total parlor sites, we will first get a comment count and arrange them in a descending order to find the site with the highest comments. Then we will conduct a sentiment analysis on it to see if they are positive or negative.
+
+Sentiment Assessment:
+
+Positive (> 0): The location is meeting or exceeding customer expectations
+
+Strongly Positive (> 0.5): Exceptional customer experiences worth replicating at other locations
+
+Negative (< 0): Indicates operational issues needing immediate attention
+
+Neutral (~ 0): Mixed experiences or adequate but not memorable service
+
+```{r code 9}
+# Finding parlor site with most comments
+parlor_analysis <- posts_clean %>%
+  group_by(ParlorLocation) %>%
+  summarise(comment_count = n()) %>%
+  arrange(desc(comment_count)) %>%
+  head(8)
+
+# Calculating sentiment for the top parlor site
+parlor_sentiment <- tidy_posts %>%
+  filter(ParlorLocation == parlor_analysis$ParlorLocation[1]) %>%
+  inner_join(afinn, by = "word") %>%
+  summarise(
+    total_sentiment_words = n(),
+    avg_sentiment = mean(value),
+    total_sentiment = sum(value),
+    sentiment_category = case_when(
+      avg_sentiment > 0.5 ~ "Strongly Positive",
+      avg_sentiment > 0 ~ "Positive", 
+      avg_sentiment < -0.5 ~ "Strongly Negative",
+      avg_sentiment < 0 ~ "Negative",
+      TRUE ~ "Neutral"
+    )
+  )
+
+# Combining results
+parlor_results <- list(
+  top_parlor_location = parlor_analysis,
+  sentiment_analysis = parlor_sentiment
+)
+
+# Displaying the results
+parlor_results
+
+# Providing visualization
+parlor_analysis %>%
+  ggplot(aes(x = reorder(ParlorLocation, comment_count), y = comment_count)) +
+  geom_col(fill = "darkorange", alpha = 0.8) +
+  geom_text(aes(label = paste0(comment_count, " comments")), 
+            hjust = -0.1,
+            size = 3.5,
+            color = "black") +
+  coord_flip() +
+  labs(title = "Top 8 Parlor Locations by Comment Volume",
+       x = "Parlor Location", 
+       y = "Number of Comments") +
+  theme_minimal() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+
+```
+
+#Results and analysis:
+
+Traverse City is our most commented-on parlor location with 8,738 customer comments, and the sentiment analysis reveals strongly positive feedback with an average sentiment score of 1.53. The reason behind this is obviously the fact that Traverse city is one of the most visited tourist spots in the state. During the summer a huge traffic of tourists visit Traverse city. Customer engagement for ice cream is also high if the customers are tourists. So this explains the reason behind Traverse city being the parlor site with the highest number of comments.
+
+Sentiment Performance:
+
+Average Sentiment Score: 1.53 (Strongly Positive)
+
+Total Sentiment Points: 5,258 across 3,426 sentiment-bearing words
+
+Classification: Strongly Positive - well above the 0.5 threshold for this category
+
+Business Implications:
+
+Exceptional Customer Experience: The strongly positive sentiment suggests Traverse City consistently delivers outstanding service and product quality.
+
+High Engagement: The combination of high comment volume and positive sentiment indicates customers are not just visiting, but are enthusiastic enough to share their experiences.
+
+Operational Excellence: This location appears to be a model for customer satisfaction. 
+
+
+##What production site has the most comments?  Are these negative or positive?
+
+Similar to the parlor site analysis, we will first find the comment count of all the 3 production sites and arrange them in descending order to see which one has the highest comments. Then we will conduct a sentiment analysis to see if they are positive or negative.
+
+Sentiment Assessment:
+
+Positive (> 0): The production location consistently delivers quality products that meet customer expectations
+
+Strongly Positive (> 0.5): Exceptional product quality that delights customers
+
+Negative (< 0): Indicates quality control issues or product formulation problems
+
+Neutral (~ 0): Adequate but not memorable product quality
+
+```{r code 10}
+# Finding production site with most comments
+production_analysis <- posts_clean %>%
+  group_by(ProductionLocation) %>%
+  summarise(comment_count = n()) %>%
+  arrange(desc(comment_count)) %>%
+  head(3)
+
+# Calculating sentiment for the top production site
+production_sentiment <- tidy_posts %>%
+  filter(ProductionLocation == production_analysis$ProductionLocation[1]) %>%
+  inner_join(afinn, by = "word") %>%
+  summarise(
+    total_sentiment_words = n(),
+    avg_sentiment = mean(value),
+    total_sentiment = sum(value),
+    sentiment_category = case_when(
+      avg_sentiment > 0.5 ~ "Strongly Positive",
+      avg_sentiment > 0 ~ "Positive", 
+      avg_sentiment < -0.5 ~ "Strongly Negative",
+      avg_sentiment < 0 ~ "Negative",
+      TRUE ~ "Neutral"
+    )
+  )
+
+# Combining results
+production_results <- list(
+  top_production_location = production_analysis,
+  sentiment_analysis = production_sentiment
+)
+
+# Displaying the results
+production_results
+
+# Providing Visualization (bar chart) with comment numbers
+production_location_freq <- posts_clean %>%
+  count(ProductionLocation, sort = TRUE)
+
+production_location_freq %>%
+  ggplot(aes(x = reorder(ProductionLocation, n), y = n)) +
+  geom_col(fill = "steelblue") +
+  geom_text(aes(label = paste0(n, " comments")), 
+            hjust = -0.1,
+            size = 3.5,
+            color = "black") +
+  coord_flip() +
+  labs(title = "Production Location Frequency Distribution",
+       x = "Production Location", 
+       y = "Number of Comments") +
+  theme_minimal() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1)))
+
+
+```
+
+
+
+#Results and Analysis:
+
+Mount Pleasant is our most commented-on production location with 12,908 customer comments, and the sentiment analysis reveals exceptionally strong positive feedback with an average sentiment score of 1.55. This high volume indicates Widespread distribution of products from this facility, a strong brand recognition and customer engagement as well as consistent product quality that prompts customer feedback.
+
+Sentiment Performance:
+
+Average Sentiment Score: 1.55 (Strongly Positive)
+
+Total Sentiment Points: 7,761 across 5,017 sentiment-bearing words
+
+Classification: Strongly Positive - exceeding the 0.5 threshold significantly
+
+
+##What are the top 10 most frequent comments made by customers and how many times did each comment get made?
+
+In the comments section there are a lot of empty entries which means there were no comments. We will filter out the empty comments and find out the top ten most frequent comments and get the frequency count of those comments.
+
+```{r code 11}
+#Counting the comments and filtering the empty comments
+top_comments <- posts_clean %>%
+  filter(Comment != "" & !is.na(Comment)) %>%  
+  count(Comment, sort = TRUE) %>%
+  head(10)
+
+#Displaying the results
+top_comments
+
+
+# Providing Visualization of the results
+top_comments %>%
+  ggplot(aes(x = reorder(Comment, n), y = n)) +
+  geom_col(fill = "purple", alpha = 0.8, width = 0.7) +
+  geom_text(aes(label = Comment, y = n/2), 
+            size = 2.8, 
+            color = "white", 
+            hjust = 0.5,
+            position = position_dodge(width = 0.9)) +
+  geom_text(aes(label = paste(n, "times"), y = n - 10), 
+            size = 2.5, 
+            color = "black", 
+            hjust = 1) +
+  coord_flip() +
+  labs(title = "Top 10 Most Frequent Customer Comments",
+       subtitle = "Comments displayed inside bars with frequency counts",
+       x = "Comments", 
+       y = "Frequency") +
+  theme_minimal() +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        plot.title = element_text(face = "bold", size = 14),
+        plot.subtitle = element_text(color = "gray40", size = 10))
+```
+
+
+##Create a network diagram based on bigrams
+
+We will follow 4 steps for this one which are:
+
+Step 1: Create bigrams from the data
+
+Step 2: Count and display the most frequent bigrams
+
+Step 3: Separate bigrams and remove stop words
+
+Step 4: Create the network diagram visualization 
+
+```{r code 12}
+
+# Creating Bigrams
+productBigram <- posts_clean %>% unnest_tokens(bigram, Comment, token = "ngrams", n = 2)
+
+#Counting the most frequent bigrams (Top 30)
+productBigram %>% count(bigram,sort=TRUE) %>% top_n(30)
+
+#Getting rid of common words
+productBigramCount <- productBigram %>% separate(bigram, c("word1", "word2"), sep = " ") %>%
+        filter(!word1 %in% stop_words$word,
+               !word2 %in% stop_words$word,
+               !is.na(word1),
+               !is.na(word2)) %>%
+        count(word1, word2, sort = TRUE)
+
+#Plotting the result
+productBigramCount %>%  filter(n >= 90) %>%
+  graph_from_data_frame() %>% ggraph(layout = "fr") +
+  geom_edge_link(aes(edge_alpha = n, edge_width = n)) +
+  geom_node_point(color = "darkslategray4", size = 3) +
+  geom_node_text(aes(label = name), vjust = 1.8, size = 3) +
+  labs(title = "Word Network: Product Comments Bigram Analysis",
+       subtitle = "Text mining customer feedback",
+       x = "", y = "") +
+  theme_void()
+
+```
+
+
+
+
+##GRADS----
+assuming you work for the company/organization for which these product comments have been collected, what can you infer from the data? If the company was asking you if they should take any actions based on customer feedback, what would you tell them and why?
+
+I will try my best to create a perfect balance of technicality and relevance in this answer. I will run codes and create visualizations that are relevant and can provide meaningful insights for the company.
+
+```{r code 13}
+# Understanding the sales data 
+sales_summary <- posts_clean %>%
+  summarise(
+    total_chocolate = sum(Chocolate, na.rm = TRUE),
+    total_feature = sum(Feature, na.rm = TRUE),
+    total_superman = sum(Superman, na.rm = TRUE),
+    total_vanilla = sum(Vanilla, na.rm = TRUE),
+    total_sales = total_chocolate + total_feature + total_superman + total_vanilla
+  )
+
+#Displaying the result
+sales_summary
+
+# Creating a bar chart for product category sales
+sales_summary_long <- sales_summary %>%
+  pivot_longer(cols = c(total_chocolate, total_feature, total_superman, total_vanilla),
+               names_to = "product_category",
+               values_to = "sales_volume") %>%
+  mutate(product_category = str_remove(product_category, "total_") %>% str_to_title())
+
+sales_summary_long %>%
+  ggplot(aes(x = reorder(product_category, sales_volume), y = sales_volume, fill = product_category)) +
+  geom_col(alpha = 0.8) +
+  geom_text(aes(label = scales::comma(sales_volume)), 
+            hjust = -0.1, 
+            size = 3.5,
+            color = "black") +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Sales by Product Category",
+       x = "Product Category",
+       y = "Sales Volume") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) 
+
+# Analyzing Feature Flavor distribution and their sentiment
+flavor_performance <- posts_clean %>%
+  group_by(FeatureFlavor) %>%
+  summarise(
+    sales_volume = sum(Feature, na.rm = TRUE),  
+    comment_count = n(),
+    unique_customers = n_distinct(CustomerID)
+  ) %>%
+  arrange(desc(sales_volume))
+
+# Showing flavors by sales
+head(flavor_performance, 15)
+
+# Combining the sales data with sentiment analysis
+flavor_sentiment <- posts_clean %>%
+  group_by(FeatureFlavor) %>%
+  summarise(
+    sales_volume = sum(Feature, na.rm = TRUE),
+    comment_count = n()
+  ) %>%
+  left_join(
+    tidy_posts %>%
+      inner_join(afinn, by = "word") %>%
+      group_by(FeatureFlavor) %>%
+      summarise(
+        avg_sentiment = mean(value),
+        total_sentiment_words = n()
+      ),
+    by = "FeatureFlavor"
+  ) %>%
+  filter(!is.na(FeatureFlavor), FeatureFlavor != "") %>%
+  arrange(desc(sales_volume))
+
+# Displaying comprehensive flavor performance
+flavor_sentiment
+
+
+# Visualizing the flavors by sales with sentiment
+flavors <- flavor_sentiment %>%
+  head(14) %>%
+  mutate(performance_score = sales_volume * avg_sentiment)
+
+flavors %>%
+  ggplot(aes(x = reorder(FeatureFlavor, sales_volume), y = sales_volume, fill = avg_sentiment)) +
+  geom_col() +
+  geom_text(aes(label = scales::comma(sales_volume)), 
+            hjust = -0.1, 
+            size = 3,
+            color = "black") +
+  coord_flip() +
+  scale_fill_gradient2(low = "red", mid = "yellow", high = "green", midpoint = 1) +
+  labs(title = "Feature Flavors by Sales Volume",
+       subtitle = "Color shows average sentiment score",
+       x = "Feature Flavor",
+       y = "Sales Volume →",
+       fill = "Sentiment Score") +
+  theme_minimal() +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15)))
+
+```
+
+
+#Analysis and Recommendations for the company:
+
+A short overview of Sales:
+
+Total Sales: 87,023 units
+
+#Feature Flavors: 43,497 units (50% of total sales)
+
+Chocolate: 17,611 units
+
+Vanilla: 17,283 units
+
+Superman: 8,632 units
+
+We observed that the feature flavors drive half of our revenue. Therefore this is where we should focus our marketing on. All ice cream companies produce basic flavors but these feature feature flavors are unique and only we produce them. So we have to leverage this absence of competitors and use it as the driving force of our marketing campaigns.
+
+
+#Analysis of the Feature Flavors based on Sales Volumes and Sentiment Value:
+
+The Customer Favorites:
+
+Leading our flavor portfolio with exceptional customer satisfaction is Robust Cherry Surprise, which has achieved the perfect balance of commercial success and customer love. With 3,691 units sold and an outstanding sentiment score of 1.89, the highest among all top-selling flavors. Customers don't just buy it, they genuinely adore it. Close behind are Thimbleberry Thunder and Strawberry Pie, both maintaining excellent sentiment scores of 1.75 and 1.70 respectively while moving impressive volumes of 3,623 and 3,607 units. These three flavors represent our top tier where customer enthusiasm matches strong sales performance.
+
+The Sales Powerhouses(High Sales Volume, Decent Sentiment Value):
+
+When it comes to pure sales dominance, Paw Claw Ice Cream stands unchallenged as our volume leader. With 4,973 units sold, it is our highest-selling feature flavor by a significant margin. This flavor demonstrates remarkable market appeal. While its sentiment score of 1.24 is solid, there's potential to elevate the customer experience to match its commercial success. Similarly, Sweet Dreams shows strong market performance with 3,987 units sold, though it appears to rely on a smaller but more intensely loyal customer base. 
+
+The worst Performer:
+Our business is a success story but it only has one outlier, one product with bad sentiment value which is the Cherry Pie Chunk. This flavor presents concern that demands immediate attention. While it has sales of 2034 units, its sentiment score of 0.18 represents the largest satisfaction gap in our portfolio. Customers are purchasing this flavor maybe because they want to try out all the flavors and trust our brand but clearly they are not enjoying the experience. Since we have a reputation of having no bad flavors according to the sentiment analysis, we must discontinue this product. It is the only product with negative sentiment value hence getting rid of it makes the most sense.
+
+
+#Recommendations:
+
+So according to my analysis we should move forward with these actions immediately:
+
+1. Discontinue production of the Cherry pie chunk. Since it's the only product with negative sentiment value, the best course of action would be to get rid of it.
+
+2. Expand production and marketing of Robust Cherry Surprise, capitalize on the cherry flavor customers actually like. So, get rid of the bad cherry flavor and double down on the good one.
+
+3. Create combo packs with the top flavors. Based on my sentiment analysis we can create combo packs of the 3 top flavors that the customers love.
+
+4. Use the positive customer feedbacks for marketing in social media platforms. Use the quotes by the customers or even feature them in marketing campaigns.
+
+
+
+
+
+
+
+
+
+
