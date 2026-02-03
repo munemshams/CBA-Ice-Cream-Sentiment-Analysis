@@ -1,4 +1,4 @@
-# CBA-Ice-Cream--Sentiment-Analysis-Project
+# CBA-Ice-Cream-Sentiment-Analysis-Project
 This project analyzes the relationship between customer sentiment, sales performance, and operational factors within an ice cream company called Cross Bridge Astounding Ice Cream using R Studio.
 The analysis identifies which flavors customers love, which products underperform, and how sentiment varies across customer locations and production sites.
 The goal is to provide data-driven recommendations for the Marketing, Management, and Production teams.
